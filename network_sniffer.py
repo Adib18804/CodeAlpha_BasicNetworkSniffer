@@ -2,12 +2,7 @@
 """
 CodeAlpha Cyber Security Internship - Task 1
 Basic Network Sniffer
-Author: <Your Name>
-Description:
-    Captures live network traffic, analyzes packet structure,
-    identifies protocols (TCP/UDP/ICMP/ARP/DNS/HTTP), extracts
-    source/destination IPs, ports, and payloads. Saves packets
-    to a .pcap file and logs a readable summary.
+Author: Adib (Adib18804)
 """
 
 import argparse
@@ -15,66 +10,37 @@ import datetime
 import os
 import sys
 import signal
+import time
 
 from scapy.all import (
-    sniff,
-    wrpcap,
-    IP,
-    IPv6,
-    TCP,
-    UDP,
-    ICMP,
-    ARP,
-    DNS,
-    Raw,
-    Ether,
+    sniff, wrpcap, IP, IPv6, TCP, UDP, ICMP, ARP, DNS, Raw,
 )
 from colorama import Fore, Style, init
 
-# Initialize colorama for cross-platform colored output
 init(autoreset=True)
 
-# ------------------------------------------------------------------
-# Global state
-# ------------------------------------------------------------------
 captured_packets = []
 LOG_DIR = "logs"
 os.makedirs(LOG_DIR, exist_ok=True)
 
-# Protocol number -> name mapping (partial)
-IP_PROTOCOLS = {
-    1: "ICMP",
-    6: "TCP",
-    17: "UDP",
-    2: "IGMP",
-    47: "GRE",
-    50: "ESP",
-    51: "AH",
-    89: "OSPF",
-}
+# Global flag for stop
+STOP = {"flag": False}
 
 
-# ------------------------------------------------------------------
-# Helper functions
-# ------------------------------------------------------------------
-def timestamp() -> str:
-    """Return current time as a formatted string."""
+def timestamp():
     return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
-def get_protocol_name(packet) -> str:
-    """Determine the highest-level protocol name for a packet."""
+def get_protocol_name(packet):
     if packet.haslayer(DNS):
         return "DNS"
     if packet.haslayer(TCP):
-        if packet[TCP].dport == 80 or packet[TCP].sport == 80:
+        if packet[TCP].dport in (80,) or packet[TCP].sport in (80,):
             return "HTTP"
-        if packet[TCP].dport == 443 or packet[TCP].sport == 443:
+        if packet[TCP].dport in (443,) or packet[TCP].sport in (443,):
             return "HTTPS/TLS"
-        if packet[TCP].dport == 22 or packet[TCP].sport == 22:
+        if packet[TCP].dport in (22,) or packet[TCP].sport in (22,):
             return "SSH"
-        if packet[TCP].dport == 21 or packet[TCP].sport == 21:
-            return "FTP"
         return "TCP"
     if packet.haslayer(UDP):
         return "UDP"
@@ -89,23 +55,18 @@ def get_protocol_name(packet) -> str:
     return "Unknown"
 
 
-def get_payload_preview(packet, max_len: int = 60) -> str:
-    """Return a printable preview of the packet payload."""
+def get_payload_preview(packet, max_len=60):
     if packet.haslayer(Raw):
         payload = bytes(packet[Raw].load)
-        try:
-            text = payload.decode("latin-1", errors="replace")
-            text = "".join(c if (32 <= ord(c) <= 126) else "." for c in text)
-        except Exception:
-            text = payload.hex()
+        text = payload.decode("latin-1", errors="replace")
+        text = "".join(c if (32 <= ord(c) <= 126) else "." for c in text)
         if len(text) > max_len:
             text = text[:max_len] + "..."
         return text
     return ""
 
 
-def get_dns_query(packet) -> str:
-    """Extract DNS query name if present."""
+def get_dns_query(packet):
     if packet.haslayer(DNS) and packet[DNS].qd is not None:
         try:
             return packet[DNS].qd.qname.decode("utf-8", errors="replace")
@@ -114,11 +75,7 @@ def get_dns_query(packet) -> str:
     return ""
 
 
-# ------------------------------------------------------------------
-# Packet processing
-# ------------------------------------------------------------------
 def process_packet(packet):
-    """Analyze a single captured packet and print a summary."""
     captured_packets.append(packet)
 
     proto = get_protocol_name(packet)
@@ -126,7 +83,6 @@ def process_packet(packet):
     src_port = dst_port = "-"
     extra = ""
 
-    # --- Layer 3 ---
     if packet.haslayer(IP):
         src_ip = packet[IP].src
         dst_ip = packet[IP].dst
@@ -138,91 +94,59 @@ def process_packet(packet):
         dst_ip = packet[ARP].pdst
         extra = f"op={'request' if packet[ARP].op == 1 else 'reply'}"
 
-    # --- Layer 4 ---
     if packet.haslayer(TCP):
         src_port = packet[TCP].sport
         dst_port = packet[TCP].dport
-        flags = packet[TCP].flags
-        extra = f"flags={flags}"
+        extra = f"flags={packet[TCP].flags}"
     elif packet.haslayer(UDP):
         src_port = packet[UDP].sport
         dst_port = packet[UDP].dport
 
-    # --- DNS ---
     if proto == "DNS":
         q = get_dns_query(packet)
         if q:
             extra = f"query={q}"
 
-    # --- Payload ---
     payload = get_payload_preview(packet)
 
-    # --- Color by protocol ---
     color = {
-        "TCP": Fore.CYAN,
-        "UDP": Fore.GREEN,
-        "HTTP": Fore.YELLOW,
-        "HTTPS/TLS": Fore.MAGENTA,
-        "DNS": Fore.BLUE,
-        "ICMP": Fore.RED,
+        "TCP": Fore.CYAN, "UDP": Fore.GREEN, "HTTP": Fore.YELLOW,
+        "HTTPS/TLS": Fore.MAGENTA, "DNS": Fore.BLUE, "ICMP": Fore.RED,
         "ARP": Fore.LIGHTBLACK_EX,
     }.get(proto, Fore.WHITE)
 
-    # --- Print ---
-    line = (
+    print(
         f"{Fore.LIGHTBLACK_EX}[{timestamp()}]{Style.RESET_ALL} "
         f"{color}{proto:<10}{Style.RESET_ALL} "
         f"{src_ip}:{src_port} -> {dst_ip}:{dst_port} "
         f"{Fore.LIGHTBLACK_EX}{extra}{Style.RESET_ALL}"
     )
-    print(line)
-
     if payload:
         print(f"    {Fore.LIGHTBLACK_EX}payload:{Style.RESET_ALL} {payload}")
 
 
-# ------------------------------------------------------------------
-# Save / exit
-# ------------------------------------------------------------------
-def save_and_exit(signum=None, frame=None):
-    """Save captured packets to a .pcap file and exit cleanly."""
-    print(f"\n{Fore.YELLOW}[!] Stopping capture...{Style.RESET_ALL}")
-
+def save_packets():
     if captured_packets:
         fname = os.path.join(
             LOG_DIR,
             f"capture_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.pcap",
         )
         wrpcap(fname, captured_packets)
-        print(
-            f"{Fore.GREEN}[+] Saved {len(captured_packets)} packets to "
-            f"{fname}{Style.RESET_ALL}"
-        )
+        print(f"{Fore.GREEN}[+] Saved {len(captured_packets)} packets to {fname}{Style.RESET_ALL}")
     else:
         print(f"{Fore.RED}[-] No packets captured.{Style.RESET_ALL}")
 
-    sys.exit(0)
+
+def handle_ctrl_c(signum, frame):
+    print(f"\n{Fore.YELLOW}[!] Ctrl+C received. Stopping...{Style.RESET_ALL}")
+    STOP["flag"] = True
 
 
-# ------------------------------------------------------------------
-# Main
-# ------------------------------------------------------------------
 def main():
-    parser = argparse.ArgumentParser(
-        description="CodeAlpha Task 1 - Basic Network Sniffer"
-    )
-    parser.add_argument(
-        "-i", "--interface", default=None,
-        help="Network interface to sniff on (default: Scapy auto-selects)"
-    )
-    parser.add_argument(
-        "-c", "--count", type=int, default=0,
-        help="Number of packets to capture (0 = infinite)"
-    )
-    parser.add_argument(
-        "-f", "--filter", default=None,
-        help="BPF filter (e.g. 'tcp', 'udp port 53', 'icmp')"
-    )
+    parser = argparse.ArgumentParser(description="CodeAlpha Task 1 - Basic Network Sniffer")
+    parser.add_argument("-i", "--interface", default=None)
+    parser.add_argument("-c", "--count", type=int, default=0)
+    parser.add_argument("-f", "--filter", default=None)
     args = parser.parse_args()
 
     print(f"{Fore.CYAN}{'='*70}")
@@ -233,29 +157,32 @@ def main():
     print(f" Filter    : {args.filter or 'none'}")
     print(f"{Fore.CYAN}{'='*70}{Style.RESET_ALL}\n")
 
-    # Register Ctrl+C handler to save pcap before exit
-    signal.signal(signal.SIGINT, save_and_exit)
+    # Register Ctrl+C handler
+    signal.signal(signal.SIGINT, handle_ctrl_c)
 
     try:
-        sniff(
-            iface=args.interface,
-            filter=args.filter,
-            prn=process_packet,
-            count=args.count,
-            store=False,
-        )
+        # Loop with timeout=1 — this way Python can process Ctrl+C every second
+        while not STOP["flag"]:
+            sniff(
+                iface=args.interface,
+                filter=args.filter,
+                prn=process_packet,
+                count=args.count if args.count > 0 else 0,
+                store=False,
+                timeout=1,
+            )
+            # If count-based, exit after first round
+            if args.count > 0:
+                break
     except PermissionError:
-        print(
-            f"{Fore.RED}[!] Permission denied. "
-            f"Run as root/administrator.{Style.RESET_ALL}"
-        )
+        print(f"{Fore.RED}[!] Permission denied. Run as Administrator.{Style.RESET_ALL}")
         sys.exit(1)
     except Exception as e:
         print(f"{Fore.RED}[!] Error: {e}{Style.RESET_ALL}")
         sys.exit(1)
-    finally:
-        if args.count > 0:
-            save_and_exit()
+
+    print(f"\n{Fore.YELLOW}[!] Stopping capture...{Style.RESET_ALL}")
+    save_packets()
 
 
 if __name__ == "__main__":
