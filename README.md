@@ -22,6 +22,6 @@ A Python-based network sniffer built for the **CodeAlpha Cyber Security Internsh
 
 ## Installation
 ```bash
-git clone https://github.com/<your-username>/CodeAlpha_BasicNetworkSniffer.git
+git clone https://github.com/Adib18804/CodeAlpha_BasicNetworkSniffer.git
 cd CodeAlpha_BasicNetworkSniffer
 pip install -r requirements.txt
