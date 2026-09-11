@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Capture logs (don't upload pcap files)
+logs/*.pcap
+logs/*.txt
+logs/*
+
+# OS
+Thumbs.db
+.DS_Store
